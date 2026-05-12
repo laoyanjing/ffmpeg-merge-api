@@ -104,6 +104,13 @@ def merge_videos():
 def health():
     return jsonify({"status": "ok"})
 
+@app.route("/debug", methods=["GET"])
+def debug():
+    key = os.environ.get("SUPABASE_KEY", "NOT SET")
+    return jsonify({
+        "key_length": len(key),
+        "key_prefix": key[:20] if len(key) > 20 else key
+    })
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
