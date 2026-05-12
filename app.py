@@ -9,6 +9,10 @@ app = Flask(__name__)
 TEMP_DIR = "/tmp/ffmpeg_workspace"
 os.makedirs(TEMP_DIR, exist_ok=True)
 
+SUPABASE_URL = os.environ.get("SUPABASE_URL", "https://bqueqwxbcreenijbbwgt.supabase.co")
+SUPABASE_KEY = os.environ.get("SUPABASE_KEY", "")
+BUCKET_NAME = "merged-videos"
+
 
 def download_video(url: str, dest_path: str) -> bool:
     try:
@@ -21,6 +25,24 @@ def download_video(url: str, dest_path: str) -> bool:
     except Exception as e:
         print(f"Download failed: {url} -> {e}")
         return False
+
+
+def upload_to_supabase(file_path: str, file_name: str) -> str:
+    upload_url = f"{SUPABASE_URL}/storage/v1/object/{BUCKET_NAME}/{file_name}"
+    with open(file_path, "rb") as f:
+        resp = requests.post(
+            upload_url,
+            headers={
+                "Authorization": f"Bearer {SUPABASE_KEY}",
+                "Content-Type": "video/mp4",
+            },
+            data=f,
+            timeout=120,
+        )
+    if resp.status_code not in (200, 201):
+        raise Exception(f"Supabase upload failed: {resp.status_code} {resp.text}")
+    public_url = f"{SUPABASE_URL}/storage/v1/object/public/{BUCKET_NAME}/{file_name}"
+    return public_url
 
 
 @app.route("/merge", methods=["POST"])
@@ -65,14 +87,17 @@ def merge_videos():
         print("FFmpeg stderr:", result.stderr)
         return jsonify({"error": "FFmpeg merge failed", "detail": result.stderr}), 500
 
-    # Return the merged video as a file download
-    from flask import send_file
-    return send_file(
-        output_path,
-        mimetype="video/mp4",
-        as_attachment=True,
-        download_name="merged.mp4"
-    )
+    # Upload to Supabase Storage
+    file_name = f"{session_id}.mp4"
+    try:
+        public_url = upload_to_supabase(output_path, file_name)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+    return jsonify({
+        "merged_url": public_url,
+        "clips": video_urls
+    })
 
 
 @app.route("/health", methods=["GET"])
